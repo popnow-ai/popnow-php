@@ -1,0 +1,15 @@
+/vendor/
+composer.lock
+
+# Runtime artefacts of the loopback suite: router.php rewrites these on every run.
+tests/srv/flaky.count
+tests/srv/received.bin
+tests/srv/received-headers.json
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Local metadata (not part of the package)
+REPO_META.json

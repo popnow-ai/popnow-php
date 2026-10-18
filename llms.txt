@@ -1,0 +1,29 @@
+# popnow-php
+
+> Dependency-free PHP 8.1+ SDK (Composer package `popnow/popnow`, namespace `PopNow`) for the PopNow API, which generates AI videos, images, music and speech with models such as Kling, Seedance, Wan, Vidu, MiniMax, Nano Banana, GPT Image, Flux and Suno. Same credits and prices as popnow.ai (1 credit = $0.01).
+
+Install (not on Packagist yet): `composer config repositories.popnow vcs https://github.com/popnow-ai/popnow-php && composer require popnow/popnow:dev-main`, or clone and `require 'autoload.php'`. Auth: `new PopNow\Client()` reads `POPNOW_API_KEY` (`sk-popnow-...`, created at https://popnow.ai/api/console/keys), or `new PopNow\Client(apiKey: ...)`. Base URL `https://api.popnow.ai/api/v1`. Every JSON response is `{code, msg, data, request_id}`; methods return `data` as an associative array. User-Agent `popnow-php/<version>`.
+
+## Core usage
+
+- `$client->createTask(model: 'alibaba/z-image-turbo/text-to-image', input: ['prompt' => ...], idempotencyKey: Client::idempotencyKey(), waitSeconds: 60)` (POST /api/v1/jobs/createTask); then `Client::isTerminal($task)` or `$client->waitForTerminal($taskId)` (polls GET /api/v1/jobs/recordInfo).
+- `Client::readyAssets($task)` lists outputs with a signed `url` (valid ~20 minutes); `Client::outputText($task)` for transcriptions.
+- `$client->quote($model, $input)` returns `maxCredits`, `quoteId`; pass `quoteId` and `expectedCredits` to `createTask()`.
+- `retryTask()`, `purgeTask()`, `listTasks()`, `iterTasks()`, `getBalance()` (availableCredits), `getUsage()`, `listModels()`, `getModel()` (inputSchema).
+- Files: `uploadFile($path)` returns `uri` `popnow://f/fil_...`; `UploadContentType::LoraWeights` for `.safetensors` up to 2 GiB; `importLoraFile($url, token:)` (POST /api/v1/files/import); `createDownloadUrl()`.
+- Asset library: `saveAsset(source: 'task_output'|'upload'|'url', idempotencyKey: ..., ...)` returns `uri` `popnow://a/ast_...`; `listAssets()`, `iterAssets()`, `getAsset()`, `updateAsset()`, `deleteAsset()`, `getAssetUsage()`, `listCharacters()`, `getCharacter()`.
+- Webhooks: `PopNow\Webhook::verifyRequest($secret)` for task callbacks (X-Webhook-Signature = base64 HMAC-SHA256 of "taskId.timestamp.sha256hex(body)"); `PopNow\EndpointWebhook::verifyRequest($whsecSecret)` for Standard Webhooks account endpoints.
+
+## Errors
+
+`PopNow\ApiError` (`$status`, `$businessCode`, `$requestId`, `$retryAfterSeconds`, `$reason`, `guidance()`, `describe()`), subclasses `TransportError`, `TimeoutError` (`$taskId`), `UploadError`; `WebhookError` (`$reason`). Codes: 401, 40003, 40004, 40201, 40202, 40301, 40302, 40303, 40310, 409, 40901, 413, 429, 503, 50301, 50302. Task failures are `state: failed` with `errorCode` (`TaskErrorCode::fromTask()`). Retries are automatic only for safe calls (reads, quotes, keyed submissions).
+
+## Links
+
+- Website: https://popnow.ai
+- Docs: https://popnow.ai/docs
+- OpenAPI: https://popnow.ai/docs/openapi.yaml
+- Pricing: https://popnow.ai/pricing
+- MCP server: https://popnow.ai/mcp (remote endpoint https://api.popnow.ai/mcp)
+- Site llms.txt: https://popnow.ai/llms.txt
+- Source: https://github.com/popnow-ai/popnow-php

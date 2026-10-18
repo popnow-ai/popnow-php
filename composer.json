@@ -1,0 +1,47 @@
+{
+  "name": "popnow/popnow",
+  "description": "PHP SDK for the PopNow AI video, image and music generation API: quote, create and poll tasks, upload files, manage assets and verify webhooks.",
+  "type": "library",
+  "license": "MIT",
+  "homepage": "https://popnow.ai",
+  "keywords": [
+    "popnow",
+    "ai-video-generator",
+    "text-to-video",
+    "image-to-video",
+    "text-to-image",
+    "ai-image-generator",
+    "ai-music-generator",
+    "text-to-speech",
+    "generative-ai",
+    "api-client",
+    "sdk"
+  ],
+  "support": {
+    "docs": "https://popnow.ai/docs",
+    "issues": "https://github.com/popnow-ai/popnow-php/issues",
+    "source": "https://github.com/popnow-ai/popnow-php"
+  },
+  "require": {
+    "php": ">=8.1",
+    "ext-json": "*",
+    "ext-hash": "*"
+  },
+  "suggest": {
+    "ext-curl": "Preferred transport. Without it the client falls back to the https:// stream wrapper, which buffers upload bodies and does not honour http_proxy.",
+    "ext-bcmath": "Used by Client::compareUsd() when present; an exact string comparison is used otherwise."
+  },
+  "autoload": {
+    "psr-4": {
+      "PopNow\\": "src/"
+    }
+  },
+  "scripts": {
+    "test": "php tests/run.php",
+    "lint": "find src tests examples scripts autoload.php -name '*.php' -print0 | xargs -0 -n1 php -l",
+    "contract": "php scripts/check_contract.php"
+  },
+  "config": {
+    "sort-packages": true
+  }
+}
