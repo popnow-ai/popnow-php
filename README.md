@@ -30,20 +30,10 @@ PopNow is a browser-based AI studio for videos, images and music: image-to-video
 
 ## Quickstart
 
-**1. Install** with Composer from this GitHub repository (a Packagist release is coming):
+**1. Install** with Composer ([`popnow/popnow` on Packagist](https://packagist.org/packages/popnow/popnow)):
 
 ```bash
-composer config repositories.popnow vcs https://github.com/popnow-ai/popnow-php
-composer require popnow/popnow:dev-main
-```
-
-That is the same as adding this to your `composer.json`:
-
-```json
-{
-  "repositories": [{ "type": "vcs", "url": "https://github.com/popnow-ai/popnow-php" }],
-  "require": { "popnow/popnow": "dev-main" }
-}
+composer require popnow/popnow
 ```
 
 No Composer? `git clone https://github.com/popnow-ai/popnow-php` and `require 'popnow-php/autoload.php';`.
@@ -281,11 +271,10 @@ Upload the image with `$client->uploadFile()`, pass the returned `popnow://f/...
 to an image-to-video model such as `alibaba/wan-3.0/image-to-video` or a Kling or Seedance model,
 then call `waitForTerminal()` or receive a webhook. Public HTTPS image URLs work without uploading.
 
-### How do I install the PopNow PHP SDK without Packagist?
+### How do I install the PopNow PHP SDK without Composer?
 
-Add the GitHub repository as a Composer VCS repository
-(`"repositories":[{"type":"vcs","url":"https://github.com/popnow-ai/popnow-php"}]`) and require
-`popnow/popnow`. Without Composer, clone the repository and `require 'autoload.php'`.
+Clone the repository and `require 'autoload.php'`; the SDK has no dependencies. With Composer,
+`composer require popnow/popnow` installs it from Packagist.
 
 ### Which AI models can I call from PHP?
 

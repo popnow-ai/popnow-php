@@ -2,7 +2,7 @@
 
 > Dependency-free PHP 8.1+ SDK (Composer package `popnow/popnow`, namespace `PopNow`) for the PopNow API, which generates AI videos, images, music and speech with models such as Kling, Seedance, Wan, Vidu, MiniMax, Nano Banana, GPT Image, Flux and Suno. Same credits and prices as popnow.ai (1 credit = $0.01).
 
-Install (not on Packagist yet): `composer config repositories.popnow vcs https://github.com/popnow-ai/popnow-php && composer require popnow/popnow:dev-main`, or clone and `require 'autoload.php'`. Auth: `new PopNow\Client()` reads `POPNOW_API_KEY` (`sk-popnow-...`, created at https://popnow.ai/api/console/keys), or `new PopNow\Client(apiKey: ...)`. Base URL `https://api.popnow.ai/api/v1`. Every JSON response is `{code, msg, data, request_id}`; methods return `data` as an associative array. User-Agent `popnow-php/<version>`.
+Install: `composer require popnow/popnow` (Packagist), or clone and `require 'autoload.php'`. Auth: `new PopNow\Client()` reads `POPNOW_API_KEY` (`sk-popnow-...`, created at https://popnow.ai/api/console/keys), or `new PopNow\Client(apiKey: ...)`. Base URL `https://api.popnow.ai/api/v1`. Every JSON response is `{code, msg, data, request_id}`; methods return `data` as an associative array. User-Agent `popnow-php/<version>`.
 
 ## Core usage
 
