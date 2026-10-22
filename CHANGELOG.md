@@ -4,6 +4,10 @@ All notable changes to `popnow/popnow` are listed here. The version is the git t
 carries no version field, and `PopNow\Client::VERSION` (sent in the `User-Agent`) must equal the
 newest heading below.
 
+## Unreleased
+
+- Docs and the pinned contract describe credits in the current unit (1 credit = $0.001 since 2026-10-19). No code change: the SDK reads credit amounts as the API returns them.
+
 ## 0.1.0
 
 - First release of the PopNow PHP SDK (`popnow/popnow`, namespace `PopNow`, PHP 8.1+, no library

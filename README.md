@@ -69,8 +69,8 @@ foreach (Client::readyAssets($task) as $asset) {
 ```
 
 Every call returns the decoded `data` of the response envelope as a plain associative array, so read
-it with `$task['state']`, not `$task->state`. A fast image model like this costs a couple of credits
-(1 credit = $0.01).
+it with `$task['state']`, not `$task->state`. A fast image model like this costs about 10 credits
+(1 credit = $0.001, so about one US cent).
 
 ## Features
 
@@ -284,7 +284,7 @@ model's price in credits.
 
 ### How much does a generation cost, and am I charged for failures?
 
-Each model has a credit price (1 credit = $0.01), shown by `quote()` before you spend anything.
+Each model has a credit price (1 credit = $0.001), shown by `quote()` before you spend anything.
 Credits come in packs with no subscription. Failed and expired tasks release their hold, so they
 cost nothing.
 

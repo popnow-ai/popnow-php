@@ -247,7 +247,7 @@ final class Client
      * as creation, but reserves no credits and starts no generation. The
      * response is `{quoteId, model, maxCredits, expectedCredits, estimatedCost,
      * maxCharge, currency, quantity, unit, expiresAt}`. Credits are integers
-     * (1 credit = $0.01); USD amounts are decimal **strings**, never floats; see
+     * (1 credit = $0.001); USD amounts are decimal **strings**, never floats; see
      * {@see self::compareUsd()}.
      *
      * The quote is signed and bound to this account, this API key and this exact
