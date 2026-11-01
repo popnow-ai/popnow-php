@@ -70,8 +70,9 @@ class ApiError extends \RuntimeException
                 . 'file again. Retrying the commit alone will fail identically.',
             40004 => 'The request is valid but the model cannot serve this exact parameter combination. '
                 . 'Change the parameter named in the message, then resubmit. Do not retry unchanged.',
-            40201 => 'Not enough credits for this task\'s hold. Buy credits at https://popnow.ai/pricing, '
-                . 'then resubmit.',
+            40201 => 'The available API balance (USD) cannot cover this task\'s hold. Add funds at '
+                . 'https://popnow.ai/api/console/billing, or lower the resolution, length or number of '
+                . 'outputs, then resubmit. Website credits do not fund API-key requests.',
             40202 => 'A key spend cap was reached. Raise the cap in the API console or wait for it to reset.',
             40301 => 'This API key is not allowed to call this model. Add the model to the key\'s allowed list.',
             40302 => 'The caller IP is outside this API key\'s allow list. Retrying from the same '

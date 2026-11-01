@@ -47,7 +47,7 @@ enum TaskErrorCode: string
      * Whether resubmitting the identical request could plausibly succeed.
      *
      * `content_rejected` and `invalid_request` are decisions about this exact
-     * request, so a retry only spends credits to reach the same answer.
+     * request, so a retry only spends money to reach the same answer.
      */
     public function isWorthRetrying(): bool
     {

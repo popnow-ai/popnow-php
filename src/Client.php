@@ -4,9 +4,10 @@
  * PopNow client for PHP 8.1+.
  *
  * PopNow (https://popnow.ai) is a browser-based AI studio for videos, images
- * and music. Its developer API serves the same image, video and audio models
- * with the same credit prices. This client covers the asynchronous workflow end
- * to end: discover a model and its input schema, upload local reference
+ * and music. Its developer API serves the same image, video and audio models at
+ * the same prices, billed in exact USD from a separate API balance (fund it at
+ * https://popnow.ai/api/console/billing). This client covers the asynchronous
+ * workflow end to end: discover a model and its input schema, upload local reference
  * material, quote a request, submit it, wait for a terminal state, collect the
  * result, and keep files in the asset library.
  *
@@ -39,7 +40,7 @@ final class Client
      * The release of this package. Keep it equal to the newest CHANGELOG.md
      * heading and the git tag; `tests/unit.php` fails when the three disagree.
      */
-    public const VERSION = '0.1.0';
+    public const VERSION = '0.2.0';
 
     public const API_BASE_URL = 'https://api.popnow.ai/api/v1';
 
@@ -188,11 +189,17 @@ final class Client
     /* -- Catalog ------------------------------------------------------------ */
 
     /**
-     * List every callable model with this account's credit prices.
+     * List every callable model with its USD prices.
      *
      * `GET /api/v1/models`. Returns `{total, items}`. The catalog is the only
      * contractual source of `model` values for `createTask`; do not hard-code
      * identifiers from a web page.
+     *
+     * Each item carries `usd`, a rate snapshot with `currency: "USD"` and every
+     * amount (`perUnit`, the chat token rates, each rule's `perUnit`) as an exact
+     * decimal string. Item `credits` is the deprecated credit-scale projection of
+     * the same rates; it may lose precision, so read `usd` and use
+     * {@see self::quote()} for the exact amount of one request.
      *
      * @param string|null $modality image, video or audio.
      * @param string|null $task     Exact task, e.g. `text-to-image`. Image editing
@@ -244,16 +251,23 @@ final class Client
      * Price a task without creating it.
      *
      * `POST /api/v1/jobs/quote`. Runs the same validation and admission checks
-     * as creation, but reserves no credits and starts no generation. The
-     * response is `{quoteId, model, maxCredits, expectedCredits, estimatedCost,
-     * maxCharge, currency, quantity, unit, expiresAt}`. Credits are integers
-     * (1 credit = $0.001); USD amounts are decimal **strings**, never floats; see
+     * as creation, but holds no funds and starts no generation. The response is
+     * `{quoteId, model, maxChargeUsd, expectedChargeUsd, currency, quantity, unit,
+     * expiresAt}` plus legacy fields. `maxChargeUsd` is the exact USD amount held
+     * on acceptance and the ceiling on the final charge; `expectedChargeUsd` is
+     * the typical charge, informational only. USD amounts are decimal
+     * **strings** with up to nine decimal places, never floats; see
      * {@see self::compareUsd()}.
+     *
+     * Legacy fields: `maxCharge` and `estimatedCost` equal `maxChargeUsd`, and
+     * `expectedCharge` equals `expectedChargeUsd`. `maxCredits` and
+     * `expectedCredits` are deprecated integer projections that round upward;
+     * do not use them for billing.
      *
      * The quote is signed and bound to this account, this API key and this exact
      * request, and is valid for five minutes. Pass `quoteId` and
-     * `expectedCredits: $quote['maxCredits']` to {@see self::createTask()} to be
-     * told (business code `40901`) when the price moved, instead of silently
+     * `expectedCostUsd: $quote['maxChargeUsd']` to {@see self::createTask()} to
+     * be told (business code `40901`) when the price moved, instead of silently
      * paying the new one.
      *
      * @param array<string,mixed> $input
@@ -267,7 +281,7 @@ final class Client
             $body['callBackUrl'] = self::requireCallbackUrl($callBackUrl);
         }
 
-        // A quote moves no credits and creates no task, so retrying is safe.
+        // A quote holds no funds and creates no task, so retrying is safe.
         return $this->requireArray($this->request('POST', '/jobs/quote', body: $body, retryable: true));
     }
 
@@ -275,9 +289,11 @@ final class Client
      * Create an asynchronous generation task.
      *
      * `POST /api/v1/jobs/createTask`. HTTP 202 means accepted, not finished;
-     * the response is `{taskId, state, estimatedCredits, estimatedCost,
-     * deadlineAt}` with `state` = `queued`. `estimatedCredits` is the amount
-     * **held**, and the final charge is capped at it.
+     * the response is `{taskId, state, estimatedCostUsd, deadlineAt}` plus legacy
+     * fields, with `state` = `queued`. `estimatedCostUsd` is the exact USD amount
+     * **held** from the API balance, and the final charge is capped at it; unused
+     * funds are released at settlement. `estimatedCost` is its legacy alias and
+     * `estimatedCredits` a deprecated integer projection.
      *
      * Always pass an `idempotencyKey`. Two things depend on it:
      *
@@ -298,10 +314,13 @@ final class Client
      *                                              `popnow://a/ast_...` assets.
      * @param string|null         $callBackUrl      Public HTTPS endpoint for terminal delivery; verify
      *                                              what arrives with {@see Webhook}.
-     * @param string|null         $quoteId          From {@see self::quote()}.
-     * @param int|null            $expectedCredits  `maxCredits` from the same quote. Wins over
-     *                                              `expectedCost` when both are sent.
-     * @param string|null         $expectedCost     The same amount as a decimal USD string.
+     * @param string|null         $quoteId          From {@see self::quote()}. Sent alone, it confirms
+     *                                              the quoted maximum.
+     * @param int|null            $expectedCredits  Deprecated: an integer display projection that
+     *                                              cannot express fractional-cent prices. Use
+     *                                              `$expectedCostUsd`. Still sent as given.
+     * @param string|null         $expectedCost     Legacy name for `$expectedCostUsd`. When both are
+     *                                              passed they must be the same amount.
      * @param int|null            $retentionSeconds Shorten retention for this one task via
      *                                              `X-PopNow-Retention`. The effective value is
      *                                              `min(header, account, platform)` and is
@@ -309,6 +328,11 @@ final class Client
      * @param int|null            $waitSeconds      Hold the connection open for up to this many
      *                                              seconds so the first poll is unnecessary.
      *                                              **It does not guarantee a finished task.**
+     * @param string|null         $expectedCostUsd  The exact USD hold you confirm: the quote's
+     *                                              `maxChargeUsd`, as the decimal string the API
+     *                                              returned (up to nine decimal places, no
+     *                                              exponent). A changed price fails with `40901`
+     *                                              before anything is held.
      *
      * `$waitSeconds` changes the shape of what comes back, and that is the trap.
      * Reaching a terminal state inside the budget returns the full task record;
@@ -328,6 +352,7 @@ final class Client
         ?string $expectedCost = null,
         ?int $retentionSeconds = null,
         ?int $waitSeconds = null,
+        ?string $expectedCostUsd = null,
     ): array {
         $body = ['model' => self::requireIdentifier($model, 'model'), 'input' => self::jsonObject($input)];
         if ($callBackUrl !== null) {
@@ -342,11 +367,16 @@ final class Client
             }
             $body['expectedCredits'] = $expectedCredits;
         }
+        if ($expectedCostUsd !== null) {
+            $body['expectedCostUsd'] = self::requireUsdAmount($expectedCostUsd, 'expectedCostUsd');
+        }
         if ($expectedCost !== null) {
-            if (preg_match('/^[0-9]+(\.[0-9]{1,9})?$/', $expectedCost) !== 1) {
-                throw new \InvalidArgumentException('expectedCost must be a decimal USD string such as "0.34"');
-            }
-            $body['expectedCost'] = $expectedCost;
+            $body['expectedCost'] = self::requireUsdAmount($expectedCost, 'expectedCost');
+        }
+        // The server refuses two different USD confirmations; saying so here names the mistake
+        // instead of spending a round trip on a 400.
+        if ($expectedCostUsd !== null && $expectedCost !== null && self::compareUsd($expectedCostUsd, $expectedCost) !== 0) {
+            throw new \InvalidArgumentException('expectedCost is a legacy name for expectedCostUsd; when both are passed they must be the same amount');
         }
 
         $headers = [];
@@ -394,7 +424,9 @@ final class Client
      * Read one task.
      *
      * `GET /api/v1/jobs/recordInfo?taskId=...`. Terminal and non-terminal states
-     * share one shape. A task belonging to another account or another API key is
+     * share one shape. `costUsd` is the exact USD hold while `settled` is false
+     * and the final USD charge once it is true; `cost` is its legacy alias, and
+     * `credits` and `exactCredits` are deprecated projections. A task belonging to another account or another API key is
      * reported as 404, indistinguishable from one that never existed.
      *
      * @param float|null $timeoutSeconds Ceiling for this one call including its
@@ -560,14 +592,18 @@ final class Client
     /* -- Account and history ------------------------------------------------ */
 
     /**
-     * This API key's balance, held credits and funding sources.
+     * The API balance behind this key: available, held and funding sources.
      *
      * `GET /api/v1/chat/credit` (the path is historical; it is the balance).
-     * Returns `{availableCredits, heldCredits, totalCredits}` as integers and
-     * `{available, held, total}` as decimal USD **strings**, plus an optional
-     * `funding` overview.
+     * Returns `{availableUsd, heldUsd, totalUsd}` as exact decimal USD
+     * **strings**, plus an optional `funding` overview. This is the independent
+     * API wallet: website credits are separate and never fund API-key requests.
      *
-     * Held credits are reserved by tasks that have not settled yet. They are not
+     * Legacy fields: `available`, `held` and `total` are aliases of the USD
+     * amounts. `availableCredits`, `heldCredits` and `totalCredits` are
+     * deprecated integer projections, not an exact balance.
+     *
+     * Held funds are reserved by tasks that have not settled yet. They are not
      * spent and not available, which is why a balance that looks unchanged after
      * a submission is not evidence that nothing was reserved.
      *
@@ -584,6 +620,10 @@ final class Client
      * `GET /api/v1/usage?from&to`. Dates are UTC calendar days forming a
      * half-open interval of at most 92 days; `to` defaults to tomorrow in UTC
      * and an omitted `from` to seven days before `to`.
+     *
+     * Returns `{from, to, currency, totalCalls, totalSpend, days, models}`.
+     * `totalSpend` and each bucket's `spend` are settled USD decimal strings;
+     * `totalCredits` and each bucket's `credits` are deprecated projections.
      *
      * **For reconciliation, not for progress.** This endpoint has an
      * account-wide budget of 30 requests per minute shared by every key, and
@@ -610,6 +650,8 @@ final class Client
      * `GET /api/v1/jobs`. Returns `{items, hasMore, nextCursor}`; `nextCursor`
      * is present only while `hasMore` is true. Metadata only: no input, no
      * output, no signed media URL. Use {@see self::getTask()} for a result.
+     * Each item's `cost` is the USD charge once `settled` is true, and the held
+     * amount before; its `credits` and `exactCredits` are deprecated.
      *
      * **Keep every filter identical while paginating and change only the
      * cursor.** {@see self::iterTasks()} does this for you.
@@ -1642,6 +1684,22 @@ final class Client
         }
 
         return $trimmed;
+    }
+
+    /**
+     * A USD amount as the contract accepts it: digits, optionally a point and one to nine
+     * decimals. No sign and no exponent: a float cast to a string can print as `1.0E-5`, which the
+     * server refuses, so pass the string the API returned instead of doing arithmetic on it.
+     */
+    private static function requireUsdAmount(string $value, string $label): string
+    {
+        if (preg_match('/^[0-9]+(\.[0-9]{1,9})?$/', $value) !== 1) {
+            throw new \InvalidArgumentException(
+                $label . ' must be a decimal USD string with up to nine decimal places, such as "0.045"',
+            );
+        }
+
+        return $value;
     }
 
     private static function requireIdentifier(string $value, string $label): string

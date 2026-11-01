@@ -40,7 +40,7 @@ try {
     $usage = $client->getAssetUsage();
     printf("library: %d items, plan %s\n", $usage['usage']['count'] ?? 0, $usage['tier']['name'] ?? '?');
 } catch (ApiError $error) {
-    // Library limits come with a reason, e.g. asset_library_locked before the first credit purchase.
+    // Library limits come with a reason, e.g. asset_library_locked before the owner's first top-up.
     fwrite(STDERR, $error->describe() . "\n" . $error->guidance() . "\n");
     exit(1);
 }

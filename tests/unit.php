@@ -155,6 +155,19 @@ check('model slug is URL-encoded into one segment',
     $t->calls[0]['url'] === 'https://api.popnow.ai/api/v1/models/family%2F1.0%2Ftext-to-image',
     $t->calls[0]['url']);
 
+// Each model carries its USD rate snapshot as exact decimal strings; the deprecated credit
+// projection still arrives next to it for older readers.
+$modelItem = ['model' => 'x/y/text-to-image', 'usd' => ['unit' => 'per_image', 'perUnit' => '0.000043125',
+    'currency' => 'USD', 'rules' => [['when' => ['resolution' => '4k'], 'perUnit' => '0.162']]],
+    'credits' => ['unit' => 'per_image', 'perUnit' => 0.043125]];
+$t = new FakeTransport([envelope(['total' => 1, 'items' => [$modelItem]])]);
+$listed = (new Client(transport: $t, sleeper: $noSleep))->listModels();
+check('model usd rates stay exact decimal strings',
+    ($listed['items'][0]['usd']['perUnit'] ?? null) === '0.000043125'
+    && ($listed['items'][0]['usd']['currency'] ?? null) === 'USD'
+    && ($listed['items'][0]['usd']['rules'][0]['perUnit'] ?? null) === '0.162');
+check('the deprecated model credits snapshot still parses', ($listed['items'][0]['credits']['perUnit'] ?? null) === 0.043125);
+
 $t = new FakeTransport([envelope(['total' => 1, 'items' => []])]);
 $client = new Client(transport: $t, sleeper: $noSleep);
 $client->listModels(modality: 'video', task: 'image-to-video', includeSchema: true, includeExamples: false);
@@ -167,39 +180,80 @@ check('query params encoded',
 
 /* -- 3. Quotes ------------------------------------------------------- */
 echo "quotes\n";
-$quoteData = ['quoteId' => 'q_1', 'model' => 'm', 'estimatedCost' => '0.043200000',
-    'maxCharge' => '0.043200000', 'currency' => 'USD', 'quantity' => '1', 'unit' => 'image',
-    'expiresAt' => '2026-09-20T00:05:00Z'];
+// The current shape: exact USD strings, plus the legacy aliases and the deprecated credit projection.
+$quoteData = ['quoteId' => 'q_1', 'model' => 'm', 'maxChargeUsd' => '0.043200001',
+    'expectedChargeUsd' => '0.0216', 'estimatedCost' => '0.043200001', 'maxCharge' => '0.043200001',
+    'expectedCharge' => '0.0216', 'maxCredits' => 44, 'expectedCredits' => 22, 'currency' => 'USD',
+    'quantity' => '1', 'unit' => 'image', 'expiresAt' => '2026-09-20T00:05:00Z'];
 $t = new FakeTransport([envelope($quoteData)]);
 $client = new Client(transport: $t, sleeper: $noSleep);
 $quote = $client->quote('m', ['prompt' => 'p']);
-check('quote returns data unwrapped', $quote['quoteId'] === 'q_1' && $quote['estimatedCost'] === '0.043200000');
+check('quote returns data unwrapped', $quote['quoteId'] === 'q_1');
+check('quote USD amounts stay exact strings (nine decimals survive)',
+    $quote['maxChargeUsd'] === '0.043200001' && $quote['expectedChargeUsd'] === '0.0216');
+check('legacy quote fields still parse', $quote['maxCredits'] === 44 && $quote['maxCharge'] === '0.043200001');
 check('quote posts to /jobs/quote', $t->calls[0]['url'] === 'https://api.popnow.ai/api/v1/jobs/quote' && $t->calls[0]['method'] === 'POST');
 
 /* -- 4. Task creation ------------------------------------------------ */
 echo "task creation\n";
-$created = ['taskId' => 'task_1', 'state' => 'queued', 'estimatedCost' => '0.0432', 'deadlineAt' => '2026-09-20T01:00:00Z'];
+$created = ['taskId' => 'task_1', 'state' => 'queued', 'estimatedCostUsd' => '0.043200001',
+    'estimatedCost' => '0.043200001', 'estimatedCredits' => 44, 'deadlineAt' => '2026-09-20T01:00:00Z'];
 $t = new FakeTransport([envelope($created, status: 202)]);
 $client = new Client(transport: $t, sleeper: $noSleep);
 $task = $client->createTask(model: 'm', input: ['prompt' => 'p'], idempotencyKey: 'k-1',
-    quoteId: 'q_1', expectedCost: '0.0432', retentionSeconds: 3600, callBackUrl: 'https://example.com/hook');
+    quoteId: $quote['quoteId'], expectedCostUsd: $quote['maxChargeUsd'], retentionSeconds: 3600,
+    callBackUrl: 'https://example.com/hook');
 check('HTTP 202 accepted as success', $task['taskId'] === 'task_1');
+check('the held amount is read as an exact USD string', $task['estimatedCostUsd'] === '0.043200001');
 $sent = json_decode($t->calls[0]['body'], true);
-check('body carries model/input/quoteId/expectedCost/callBackUrl',
+check('body carries model/input/quoteId/expectedCostUsd/callBackUrl',
     $sent['model'] === 'm' && $sent['input'] === ['prompt' => 'p']
-    && $sent['quoteId'] === 'q_1' && $sent['expectedCost'] === '0.0432'
-    && $sent['callBackUrl'] === 'https://example.com/hook');
+    && $sent['quoteId'] === 'q_1' && $sent['expectedCostUsd'] === '0.043200001'
+    && $sent['callBackUrl'] === 'https://example.com/hook', $t->calls[0]['body']);
+check('the USD confirmation is sent as a JSON string, never a number',
+    str_contains($t->calls[0]['body'], '"expectedCostUsd":"0.043200001"'), $t->calls[0]['body']);
+check('a USD confirmation sends no credit or legacy amount',
+    !array_key_exists('expectedCredits', $sent) && !array_key_exists('expectedCost', $sent));
 check('Idempotency-Key header sent', ($t->calls[0]['headers']['Idempotency-Key'] ?? '') === 'k-1');
 check('X-PopNow-Retention header sent', ($t->calls[0]['headers']['X-PopNow-Retention'] ?? '') === '3600');
 
-// Credits: expectedCredits is the quote's maxCredits, sent as an integer.
+// quoteId alone is a complete confirmation: no amount is invented for it.
 $t = new FakeTransport([envelope($created, status: 202)]);
 (new Client(transport: $t, sleeper: $noSleep))->createTask(model: 'm', input: ['prompt' => 'p'],
-    idempotencyKey: 'k-c', quoteId: 'q_1', expectedCredits: 34);
+    idempotencyKey: 'k-q', quoteId: 'q_1');
 $sent = json_decode($t->calls[0]['body'], true);
-check('expectedCredits goes in the body as an integer', ($sent['expectedCredits'] ?? null) === 34, $t->calls[0]['body']);
-check('no expectedCost unless given', !array_key_exists('expectedCost', $sent));
-foreach (['expectedCredits' => -1, 'expectedCost' => '0.1.2', 'callBackUrl' => 'http://example.com/hook',
+check('quoteId alone sends no amount',
+    $sent['quoteId'] === 'q_1' && !array_key_exists('expectedCostUsd', $sent) && !array_key_exists('expectedCredits', $sent));
+
+// The legacy USD name and the deprecated credit projection still go out unchanged.
+$t = new FakeTransport([envelope(['taskId' => 'task_1', 'state' => 'queued', 'estimatedCost' => '0.0432',
+    'estimatedCredits' => 44, 'deadlineAt' => '2026-09-20T01:00:00Z'], status: 202)]);
+$legacy = (new Client(transport: $t, sleeper: $noSleep))->createTask(model: 'm', input: ['prompt' => 'p'],
+    idempotencyKey: 'k-c', quoteId: 'q_1', expectedCredits: 44, expectedCost: '0.0432');
+$sent = json_decode($t->calls[0]['body'], true);
+check('deprecated expectedCredits goes in the body as an integer', ($sent['expectedCredits'] ?? null) === 44, $t->calls[0]['body']);
+check('legacy expectedCost goes in the body as a string', ($sent['expectedCost'] ?? null) === '0.0432');
+check('no expectedCostUsd unless given', !array_key_exists('expectedCostUsd', $sent));
+check('a legacy-only acceptance still parses', $legacy['estimatedCredits'] === 44 && $legacy['estimatedCost'] === '0.0432');
+
+// Both USD names may be sent together only for the same amount; trailing zeros are the same amount.
+$t = new FakeTransport([envelope($created, status: 202)]);
+(new Client(transport: $t, sleeper: $noSleep))->createTask(model: 'm', input: ['prompt' => 'p'],
+    idempotencyKey: 'k-b', expectedCostUsd: '0.0432', expectedCost: '0.043200000');
+$sent = json_decode($t->calls[0]['body'], true);
+check('matching expectedCostUsd and expectedCost are both sent as given',
+    $sent['expectedCostUsd'] === '0.0432' && $sent['expectedCost'] === '0.043200000');
+try {
+    (new Client(transport: new FakeTransport([]), sleeper: $noSleep))->createTask(model: 'm', input: ['a' => 1],
+        idempotencyKey: 'k', expectedCostUsd: '0.0432', expectedCost: '0.05');
+    check('createTask refuses two different USD confirmations locally', false);
+} catch (InvalidArgumentException $e) {
+    check('createTask refuses two different USD confirmations locally', str_contains($e->getMessage(), 'expectedCostUsd'));
+}
+
+foreach (['expectedCredits' => -1, 'expectedCost' => '0.1.2', 'expectedCostUsd' => '1.0E-5',
+          'expectedCostUsd ' => '0.1234567891', 'expectedCostUsd  ' => '-0.5', 'expectedCostUsd   ' => '.5',
+          'callBackUrl' => 'http://example.com/hook',
           'callBackUrl ' => 'https://user:pw@example.com/hook'] as $field => $badValue) {
     try {
         $arguments = ['model' => 'm', 'input' => ['a' => 1], 'idempotencyKey' => 'k', trim($field) => $badValue];
@@ -321,8 +375,10 @@ catch (ApiError $e) { check('HTTP 200 with code!=200 raises', $e->businessCode =
 
 /* -- 6. Polling ------------------------------------------------------ */
 echo "polling\n";
-$running = ['taskId' => 't', 'model' => 'm', 'state' => 'running', 'cost' => '0.04', 'settled' => false, 'createdAt' => 'x'];
-$succeeded = ['taskId' => 't', 'model' => 'm', 'state' => 'succeeded', 'cost' => '0.04', 'settled' => true,
+$running = ['taskId' => 't', 'model' => 'm', 'state' => 'running', 'costUsd' => '0.04', 'cost' => '0.04',
+    'credits' => 40, 'exactCredits' => '40', 'settled' => false, 'createdAt' => 'x'];
+$succeeded = ['taskId' => 't', 'model' => 'm', 'state' => 'succeeded', 'costUsd' => '0.000043125', 'cost' => '0.000043125',
+    'credits' => 1, 'exactCredits' => '0.043125', 'settled' => true,
     'createdAt' => 'x', 'output' => ['assets' => [['key' => 'a', 'url' => 'https://cdn/x.png', 'mime' => 'image/png']]]];
 $pending = $succeeded; $pending['output']['assets'][0] = ['key' => 'a', 'pending' => true];
 
@@ -332,6 +388,8 @@ $seen = [];
 $final = $client->waitForTerminal('t', onUpdate: function (array $task) use (&$seen): void { $seen[] = $task['state']; });
 check('waitForTerminal polls to a terminal state', $final['state'] === 'succeeded' && count($t->calls) === 3);
 check('onUpdate fires per poll', $seen === ['running', 'running', 'succeeded']);
+check('the settled task reads its exact USD charge', $final['settled'] === true && $final['costUsd'] === '0.000043125');
+check('the deprecated task credit fields still parse', $final['credits'] === 1 && $final['exactCredits'] === '0.043125');
 
 $t = new FakeTransport([envelope($pending), envelope($succeeded)]);
 $client = new Client(transport: $t, sleeper: $noSleep);
@@ -495,6 +553,17 @@ check('Client::ASSET_SOURCES equals the pinned contract enum',
     contract_enum($pinned, 'AssetCreateRequest', 'source') === (static function (): array {
         $values = Client::ASSET_SOURCES; sort($values); return $values;
     })());
+// The USD names this package documents and sends must be in the contract it pins.
+foreach (['maxChargeUsd', 'expectedChargeUsd', 'expectedCostUsd', 'estimatedCostUsd', 'costUsd',
+          'availableUsd', 'heldUsd', 'totalUsd', 'totalSpend'] as $usdField) {
+    check("the pinned contract declares $usdField", preg_match('/^\s+' . $usdField . ':$/m', $pinned) === 1);
+}
+// The pinned copy is the published one minus lines naming a forbidden word. The filter must drop
+// exactly the lines that name it and keep every other byte, or the drift comparison means nothing.
+$controlDigest = ['f07ff2d911bc1a4fae6f91ced54264746abe2edd7fda8220a79023f2c76d2244'];
+check('the contract filter drops only the lines that name a forbidden word',
+    contract_strip_vendor_lines("a:\n  - x/zebracontrol-1/y\n  - x/plain/y\n", $controlDigest) === "a:\n  - x/plain/y\n");
+check('the pinned contract is already filtered', contract_strip_vendor_lines($pinned) === $pinned);
 
 /* ── 9. download-url ───────────────────────────────────────────── */
 echo "download-url\n";
@@ -557,7 +626,7 @@ $now = 1_758_000_000;
 
 // v2
 $v2Body = json_encode(['code' => 200, 'msg' => 'success', 'request_id' => 'del_1',
-    'data' => ['taskId' => 'task_9', 'model' => 'm', 'state' => 'succeeded', 'cost' => '0.04', 'settled' => true, 'createdAt' => 'x']]);
+    'data' => ['taskId' => 'task_9', 'model' => 'm', 'state' => 'succeeded', 'costUsd' => '0.04', 'cost' => '0.04', 'settled' => true, 'createdAt' => 'x']]);
 $sig2 = Webhook::computeSignature('task_9', (string) $now, $v2Body, $secret);
 $v = Webhook::verify($v2Body, (string) $now, $sig2, $secret, 2, now: $now);
 check('v2 verifies', $v->taskId === 'task_9' && $v->payloadVersion === 2);
@@ -660,7 +729,7 @@ echo "Endpoint webhooks\n";
 $endpointKey = random_bytes(24);
 $endpointSecret = 'whsec_' . base64_encode($endpointKey);
 $eventBody = '{"type":"task.succeeded","timestamp":"2026-10-19T00:00:00Z","data":{"object":'
-    . '{"taskId":"task_9","state":"succeeded","credits":34}}}';
+    . '{"taskId":"task_9","state":"succeeded","costUsd":"0.034","settled":true}}}';
 $msgId = 'msg_01k3m8x9q2z4v7n5p6r8s0t1w3';
 $endpointSig = EndpointWebhook::computeSignature($msgId, (string) $now, $eventBody, $endpointSecret);
 check('endpoint signature is v1,base64(hmac(decoded key, id.ts.body))',
@@ -697,18 +766,26 @@ catch (WebhookError $e) { check('endpoint: missing headers rejected', $e->reason
 
 /* -- 13.5 Account, usage and task history ---------------------------- */
 echo "account and history\n";
-$balanceData = ['available' => '12.340000000', 'held' => '0.043200000', 'total' => '12.383200000'];
+$balanceData = ['availableUsd' => '12.340000001', 'heldUsd' => '0.043200000', 'totalUsd' => '12.383200001',
+    'available' => '12.340000001', 'held' => '0.043200000', 'total' => '12.383200001',
+    'availableCredits' => 12340, 'heldCredits' => 44, 'totalCredits' => 12384];
 $t = new FakeTransport([envelope($balanceData)]);
 $client = new Client(transport: $t, sleeper: $noSleep);
 $balance = $client->getBalance();
 check('getBalance reads GET /chat/credit',
     $t->calls[0]['method'] === 'GET' && $t->calls[0]['url'] === 'https://api.popnow.ai/api/v1/chat/credit',
     $t->calls[0]['url']);
-check('getBalance unwraps the envelope data', $balance['available'] === '12.340000000');
+check('getBalance unwraps the exact USD balance',
+    $balance['availableUsd'] === '12.340000001' && $balance['heldUsd'] === '0.043200000'
+    && $balance['totalUsd'] === '12.383200001');
+check('getBalance still parses the deprecated credit projection',
+    $balance['availableCredits'] === 12340 && $balance['available'] === '12.340000001');
 check('getBalance sends no body', $t->calls[0]['body'] === null);
 
 $usageData = ['from' => '2026-09-01', 'to' => '2026-09-08', 'currency' => 'USD',
-    'totalCalls' => 12, 'totalSpend' => '1.234000000', 'days' => [], 'models' => []];
+    'totalCalls' => 12, 'totalSpend' => '1.234000000', 'totalCredits' => 1234,
+    'days' => [['day' => '2026-09-01', 'calls' => 12, 'succeeded' => 11, 'failed' => 1, 'spend' => '1.234000000', 'credits' => 1234]],
+    'models' => [['model' => 'm', 'calls' => 12, 'succeeded' => 11, 'failed' => 1, 'spend' => '1.234000000', 'credits' => 1234]]];
 $t = new FakeTransport([envelope($usageData)]);
 $client = new Client(transport: $t, sleeper: $noSleep);
 $usage = $client->getUsage('2026-09-01', '2026-09-08');
@@ -716,6 +793,9 @@ check('getUsage encodes from/to',
     str_contains($t->calls[0]['url'], '/usage?') && str_contains($t->calls[0]['url'], 'from=2026-09-01')
     && str_contains($t->calls[0]['url'], 'to=2026-09-08'), $t->calls[0]['url']);
 check('getUsage unwraps the envelope data', $usage['totalSpend'] === '1.234000000');
+check('usage buckets carry USD spend strings next to the deprecated credits',
+    $usage['days'][0]['spend'] === '1.234000000' && $usage['models'][0]['spend'] === '1.234000000'
+    && $usage['totalCredits'] === 1234);
 
 // With no parameters at all, not even a question mark goes out: the contract states plainly that
 // empty parameters are rejected.
@@ -1177,47 +1257,8 @@ check('the hygiene scans read the repository',
 check('the hygiene scans include the client source',
     in_array(realpath(__DIR__ . '/../src/Client.php'), array_map('realpath', $trackedFiles), true));
 
-/**
- * Names that must never appear in this repository: third-party infrastructure and service vendors
- * the public package has no business naming. They are stored as SHA-256 digests of the lower-cased
- * word so that this file does not contain, and therefore does not match, the names it scans for.
- * Add a name with: printf %s name | shasum -a 256
- */
-const VENDOR_NAME_DIGESTS = [
-    '2efa64f91736e51bfbcae85be793635c890cf873727a90a959ad0fbcffafbead',
-    'f913085cbacece709571cd312b94473040b3911458ba09fb2b16d1229fe9433f',
-    '66f4068e63b8c53e5a3ee2178092043355052454d09fa424f564fd6910084685',
-    'b858f760399ed93651e22bac52481458da23ff4c00490531ede9b832992a42fa',
-    'afa92e210e352872087e0ee958ff658373593e3d3f86e45d6e9cdb18aa56758a',
-    '53d62381341991fc48b998beeef530c8fb036c9539af1d2881fad4794d523313',
-    '3d469302580313fbb6d7bfd6bade27401ebcadca8a647fc153dc01303354c30c',
-    '4f45d0540bebdfb19c8a9eea90fcb6e3bac6c37c4ccf01b669adbfa713b1345e',
-    '9d6b0d69459b31a1c6c47ca7fc8466526c7b9620c76aae6d4d8e83508f713764',
-    '5fa956575122f6b93ff58803085b870c524015af26bc8b775a6a5e3d13298793',
-    '7ea0a2c0ff0cb88820886758ee1d840e1ca1d56185d0b06ec2342e0f2db17125',
-    '2834e64f3da4f1eb41677ad96d9205c4dfe35997ee2df8a3ce7decf90d738a21',
-];
-
-/**
- * Every distinct word of $text whose digest is in $digests.
- *
- * @param list<string> $digests
- *
- * @return list<string>
- */
-function vendor_name_hits(string $text, array $digests): array
-{
-    $wanted = array_flip($digests);
-    $hits = [];
-    preg_match_all('/[a-z0-9]+/', strtolower($text), $words);
-    foreach (array_unique($words[0]) as $word) {
-        if (isset($wanted[hash('sha256', $word)])) {
-            $hits[] = $word;
-        }
-    }
-
-    return $hits;
-}
+// VENDOR_NAME_DIGESTS and vendor_name_hits() live in scripts/contract_lib.php, required above, because
+// scripts/check_contract.php drops the same names from the published contract before comparing.
 
 // The scanner itself must work: a planted control word with a known digest is found.
 check('the vendor-name scanner finds a planted control word',

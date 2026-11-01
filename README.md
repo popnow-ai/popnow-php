@@ -9,7 +9,7 @@
 
   <h1>PopNow PHP SDK: AI Video, Image and Music Generation API</h1>
 
-  <p><strong>popnow/popnow</strong> is a dependency-free PHP 8.1+ client for the PopNow API that turns text, images and audio into AI videos, images, music and speech, using the same models, prices and credits as <a href="https://popnow.ai">popnow.ai</a>.</p>
+  <p><strong>popnow/popnow</strong> is a dependency-free PHP 8.1+ client for the PopNow API that turns text, images and audio into AI videos, images, music and speech, using the same models and prices as <a href="https://popnow.ai">popnow.ai</a>, billed in exact USD from your API balance.</p>
 
   <p>
     <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
@@ -20,11 +20,12 @@
   </p>
 </div>
 
-PopNow is a browser-based AI studio for videos, images and music: image-to-video, text-to-video, AI images, music and speech, one-tap trending video effects and image styles. This SDK wraps its developer API (`https://api.popnow.ai/api/v1`) so you can call Kling, Seedance, Wan, Vidu, MiniMax, Nano Banana, GPT Image, Flux, Suno and more from PHP. Credit packs, no subscription; failed runs are refunded. *Make it pop.*
+PopNow is a browser-based AI studio for videos, images and music: image-to-video, text-to-video, AI images, music and speech, one-tap trending video effects and image styles. This SDK wraps its developer API (`https://api.popnow.ai/api/v1`) so you can call Kling, Seedance, Wan, Vidu, MiniMax, Nano Banana, GPT Image, Flux, Suno and more from PHP. Pay as you go in USD from a prepaid [API balance](https://popnow.ai/api/console/billing), no subscription; failed runs release their hold. *Make it pop.*
 
 - **No dependencies.** `ext-json` and `ext-hash`; `ext-curl` when present, otherwise the `https://` stream wrapper.
 - **Safe retries.** Reads, quotes and keyed submissions are retried on `429` / `5xx` honouring `Retry-After`; a task without an `Idempotency-Key` is never resent behind your back.
 - **The whole async flow.** Quote, create, wait (`?wait=` or polling), retry, purge, history, usage and balance.
+- **Exact USD.** Prices, holds, charges and balances are decimal strings with up to nine decimal places, never floats.
 - **Files and assets.** Streaming three-step upload (90 MiB media, 2 GiB LoRA weights), LoRA import from a link, and the asset library (`popnow://a/...`).
 - **Webhooks.** Constant-time verification of task callbacks and Standard Webhooks account endpoints.
 
@@ -38,7 +39,7 @@ composer require popnow/popnow
 
 No Composer? `git clone https://github.com/popnow-ai/popnow-php` and `require 'popnow-php/autoload.php';`.
 
-**2. Create an API key** in the [API console](https://popnow.ai/api/console/keys) and export it:
+**2. Create an API key** in the [API console](https://popnow.ai/api/console/keys), add funds in [API billing](https://popnow.ai/api/console/billing) (the API balance starts at $0 and is separate from website credits), and export the key:
 
 ```bash
 export POPNOW_API_KEY="sk-popnow-..."
@@ -69,8 +70,8 @@ foreach (Client::readyAssets($task) as $asset) {
 ```
 
 Every call returns the decoded `data` of the response envelope as a plain associative array, so read
-it with `$task['state']`, not `$task->state`. A fast image model like this costs about 10 credits
-(1 credit = $0.001, so about one US cent).
+it with `$task['state']`, not `$task->state`. A fast image model like this costs about one US cent;
+`$task['costUsd']` is the exact charge once `$task['settled']` is true.
 
 ## Features
 
@@ -90,12 +91,16 @@ it with `$task['state']`, not `$task->state`. A fast image model like this costs
 
 ### Supported models
 
-Everything in the live catalog: video (Kling, Seedance, Wan, Vidu, MiniMax, LTX, HunyuanVideo), images (Nano Banana, GPT Image, Flux, Seedream, Qwen Image, Krea), music and audio (Suno, MiniMax Music), speech and transcription, plus PopNow tools such as background removal and upscaling. Model IDs look like `<publisher>/<model>/<task>`; list them with `listModels()` or browse [popnow.ai/docs/models](https://popnow.ai/docs/models). Build each request's `input` from that model's `inputSchema`:
+Everything in the live catalog: video (Kling, Seedance, Wan, Vidu, MiniMax, LTX, HunyuanVideo), images (Nano Banana, GPT Image, Flux, Seedream, Qwen Image, Krea), music and audio (Suno, MiniMax Music), speech and transcription, plus PopNow tools such as background removal and upscaling. Model IDs look like `<publisher>/<model>/<task>`; list them with `listModels()` or browse [popnow.ai/api/models](https://popnow.ai/api/models). Build each request's `input` from that model's `inputSchema`, and read its price from `usd`:
 
 ```php
 $model = $client->getModel('alibaba/wan-3.0/image-to-video');
 print_r(array_keys($model['inputSchema']['properties'] ?? []));
+printf("from $%s %s\n", $model['usd']['perUnit'] ?? '?', $model['usd']['unit'] ?? '');   // starting rate, e.g. per_second
 ```
+
+`usd` is a rate snapshot whose amounts are exact decimal strings; the model's `credits` object is a
+deprecated projection of the same rates. Use `quote()` for the exact amount of one request.
 
 ## Usage
 
@@ -104,19 +109,22 @@ print_r(array_keys($model['inputSchema']['properties'] ?? []));
 ```php
 $input = ['prompt' => 'A lantern drifting through fog'];
 $quote = $client->quote('alibaba/z-image-turbo/text-to-image', $input);
-printf("at most %d credits\n", $quote['maxCredits']);
+printf("at most $%s (usually $%s)\n", $quote['maxChargeUsd'], $quote['expectedChargeUsd']);
 
 $task = $client->createTask(
     model: $quote['model'],
     input: $input,
     idempotencyKey: Client::idempotencyKey(),
     quoteId: $quote['quoteId'],
-    expectedCredits: $quote['maxCredits'],   // a changed price fails with 40901 instead of charging more
+    expectedCostUsd: $quote['maxChargeUsd'],   // a changed price fails with 40901 instead of charging more
 );
+echo $task['estimatedCostUsd'], " USD held\n";
 ```
 
-A quote is valid for five minutes and reserves nothing. `createTask()` holds `maxCredits`; the final
-charge is never higher, and a failed or expired task releases the hold.
+A quote is valid for five minutes and holds nothing. `createTask()` holds `maxChargeUsd` from your
+API balance; the final charge (`costUsd` on the settled task) is never higher, and a failed or
+expired task releases the hold. `expectedChargeUsd` is the typical charge, for display only: confirm
+with `maxChargeUsd`, or pass `quoteId` alone. Pass USD amounts on as the strings the API returned.
 
 ### Image to video from a local file
 
@@ -159,7 +167,8 @@ $task = $client->createTask(
 ### Asset library
 
 Task outputs expire; saved assets stay until you delete them and get a stable URI that works in any
-matching media field:
+matching media field. Storage unlocks with the account owner's lifetime top-ups; `getAssetUsage()`
+shows the plan and limits:
 
 ```php
 $asset = $client->saveAsset(
@@ -211,15 +220,21 @@ outside a five-minute window.
 ### Balance, usage and history
 
 ```php
-$balance = $client->getBalance();                           // availableCredits, heldCredits, ...
+$balance = $client->getBalance();
+printf("$%s available, $%s held\n", $balance['availableUsd'], $balance['heldUsd']);
+
 $usage = $client->getUsage('2026-10-01', '2026-10-08');     // settled spend over [from, to)
+printf("%d calls, $%s\n", $usage['totalCalls'], $usage['totalSpend']);
 
 foreach ($client->iterTasks(state: 'succeeded') as $summary) {
-    echo $summary['taskId'], "\n";                          // every page, filters repeated for you
+    echo $summary['taskId'], ' $', $summary['cost'], "\n";  // every page, filters repeated for you
 }
 ```
 
-Credits are integers; USD amounts are decimal strings, compare them with `Client::compareUsd()`.
+USD amounts are decimal strings with up to nine decimal places: keep every digit, and compare them
+with `Client::compareUsd()` rather than casting to float. The balance is the API balance only;
+website credits are separate and never fund API-key requests. The integer credit fields that still
+appear (`availableCredits`, `credits`, `totalCredits`, ...) are deprecated projections.
 `getUsage()` is for reconciliation (30 requests per minute per account), not for progress; follow a
 task with `getTask()`. History and usage cover this API key only.
 
@@ -250,7 +265,7 @@ Failures throw `ApiError` carrying `$status`, `$businessCode`, `$requestId`, `$r
 | `401` | missing, unknown or revoked key | create a key in the API console |
 | `40003` | uploaded bytes do not match their ticket | upload again with a fresh ticket |
 | `40004` | the model cannot serve this parameter combination | change the parameter named in `msg` |
-| `40201` | not enough credits for the hold | [buy credits](https://popnow.ai/pricing), then resend |
+| `40201` | the available API balance cannot cover the hold | [add funds](https://popnow.ai/api/console/billing), then resend |
 | `40310` | the account email is not verified | open the verification link; the same key then works |
 | `409` | the idempotency key was reused for a different request | resend the original, or use a new key |
 | `40901` | the quote expired or the price moved | quote again, keep the same idempotency key |
@@ -280,13 +295,23 @@ Clone the repository and `require 'autoload.php'`; the SDK has no dependencies. 
 
 Every image, video and audio model in the PopNow catalog, including Kling, Seedance, Wan, Vidu,
 MiniMax, Nano Banana, GPT Image, Flux and Suno. `listModels()` returns the live list with each
-model's price in credits.
+model's USD rates in `usd`.
 
 ### How much does a generation cost, and am I charged for failures?
 
-Each model has a credit price (1 credit = $0.001), shown by `quote()` before you spend anything.
-Credits come in packs with no subscription. Failed and expired tasks release their hold, so they
+Each model has a USD price per image, per second or per request, the same as on popnow.ai; see
+[API pricing](https://popnow.ai/api/pricing). `quote()` returns the exact `maxChargeUsd` for one
+request before you spend anything. API calls are paid from a prepaid API balance in USD, separate
+from website credits, with no subscription. Failed and expired tasks release their hold, so they
 cost nothing.
+
+### Is there an MCP server for Claude Code, Cursor or Codex?
+
+Yes. The [PopNow Developer MCP server](https://popnow.ai/api/mcp) at
+`https://api.popnow.ai/api/v1/mcp` uses the same API key and API balance as this SDK, and quotes in
+USD before anything runs. Setup guides and the `@popnow/mcp` stdio bridge are in
+[popnow-api-mcp](https://github.com/popnow-ai/popnow-api-mcp). Agent skills for the API are at
+[popnow.ai/api/skills](https://popnow.ai/api/skills).
 
 ### Is it safe to retry `createTask()` after a timeout?
 
@@ -310,10 +335,12 @@ and pass `$request->getContent()` as `rawBody` when verifying webhooks. The clie
 - Website: [popnow.ai](https://popnow.ai)
 - Docs: [popnow.ai/docs](https://popnow.ai/docs)
 - API reference (OpenAPI): [popnow.ai/docs/openapi.yaml](https://popnow.ai/docs/openapi.yaml), pinned here in [`contracts/openapi.yaml`](contracts/openapi.yaml)
-- Pricing: [popnow.ai/pricing](https://popnow.ai/pricing)
-- MCP server: [popnow.ai/mcp](https://popnow.ai/mcp)
+- API pricing: [popnow.ai/api/pricing](https://popnow.ai/api/pricing)
+- API billing (add funds): [popnow.ai/api/console/billing](https://popnow.ai/api/console/billing)
+- Developer MCP server: [popnow.ai/api/mcp](https://popnow.ai/api/mcp) (endpoint `https://api.popnow.ai/api/v1/mcp`)
+- Agent skills: [popnow.ai/api/skills](https://popnow.ai/api/skills)
 - llms.txt: [popnow.ai/llms.txt](https://popnow.ai/llms.txt)
-- Other PopNow repos: [popnow-python](https://github.com/popnow-ai/popnow-python), [popnow-js](https://github.com/popnow-ai/popnow-js), [popnow-go](https://github.com/popnow-ai/popnow-go), [popnow-cli](https://github.com/popnow-ai/popnow-cli), [popnow-api](https://github.com/popnow-ai/popnow-api), [popnow-mcp](https://github.com/popnow-ai/popnow-mcp), [popnow-skills](https://github.com/popnow-ai/popnow-skills), [popnow-comfyui](https://github.com/popnow-ai/popnow-comfyui), [n8n-nodes-popnow](https://github.com/popnow-ai/n8n-nodes-popnow), [popnow-blender](https://github.com/popnow-ai/popnow-blender)
+- Other PopNow repos: [popnow-python](https://github.com/popnow-ai/popnow-python), [popnow-js](https://github.com/popnow-ai/popnow-js), [popnow-go](https://github.com/popnow-ai/popnow-go), [popnow-cli](https://github.com/popnow-ai/popnow-cli), [popnow-api](https://github.com/popnow-ai/popnow-api), [popnow-api-mcp](https://github.com/popnow-ai/popnow-api-mcp), [popnow-skills](https://github.com/popnow-ai/popnow-skills), [popnow-comfyui](https://github.com/popnow-ai/popnow-comfyui), [n8n-nodes-popnow](https://github.com/popnow-ai/n8n-nodes-popnow), [popnow-blender](https://github.com/popnow-ai/popnow-blender)
 
 ## Contributing
 

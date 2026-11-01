@@ -1,6 +1,6 @@
 # popnow-php
 
-> Dependency-free PHP 8.1+ SDK (Composer package `popnow/popnow`, namespace `PopNow`) for the PopNow API, which generates AI videos, images, music and speech with models such as Kling, Seedance, Wan, Vidu, MiniMax, Nano Banana, GPT Image, Flux and Suno. Same credits and prices as popnow.ai (1 credit = $0.001).
+> Dependency-free PHP 8.1+ SDK (Composer package `popnow/popnow`, namespace `PopNow`) for the PopNow API, which generates AI videos, images, music and speech with models such as Kling, Seedance, Wan, Vidu, MiniMax, Nano Banana, GPT Image, Flux and Suno. Same prices as popnow.ai, billed in exact USD from a separate prepaid API balance (fund it at https://popnow.ai/api/console/billing; website credits do not fund API-key requests).
 
 Install: `composer require popnow/popnow` (Packagist), or clone and `require 'autoload.php'`. Auth: `new PopNow\Client()` reads `POPNOW_API_KEY` (`sk-popnow-...`, created at https://popnow.ai/api/console/keys), or `new PopNow\Client(apiKey: ...)`. Base URL `https://api.popnow.ai/api/v1`. Every JSON response is `{code, msg, data, request_id}`; methods return `data` as an associative array. User-Agent `popnow-php/<version>`.
 
@@ -8,8 +8,9 @@ Install: `composer require popnow/popnow` (Packagist), or clone and `require 'au
 
 - `$client->createTask(model: 'alibaba/z-image-turbo/text-to-image', input: ['prompt' => ...], idempotencyKey: Client::idempotencyKey(), waitSeconds: 60)` (POST /api/v1/jobs/createTask); then `Client::isTerminal($task)` or `$client->waitForTerminal($taskId)` (polls GET /api/v1/jobs/recordInfo).
 - `Client::readyAssets($task)` lists outputs with a signed `url` (valid ~20 minutes); `Client::outputText($task)` for transcriptions.
-- `$client->quote($model, $input)` returns `maxCredits`, `quoteId`; pass `quoteId` and `expectedCredits` to `createTask()`.
-- `retryTask()`, `purgeTask()`, `listTasks()`, `iterTasks()`, `getBalance()` (availableCredits), `getUsage()`, `listModels()`, `getModel()` (inputSchema).
+- `$client->quote($model, $input)` returns `quoteId`, `maxChargeUsd` (exact maximum hold) and `expectedChargeUsd` (typical, informational); pass `quoteId` and `expectedCostUsd: $quote['maxChargeUsd']` to `createTask()`, which returns `estimatedCostUsd` (the hold). A task's `costUsd` is the final charge once `settled` is true.
+- USD amounts are decimal strings with up to nine decimal places; never cast them to float (`Client::compareUsd()` compares them). Credit fields (`maxCredits`, `expectedCredits`, `estimatedCredits`, `credits`, `availableCredits`, model `credits`) and the `expectedCredits` parameter are deprecated.
+- `retryTask()`, `purgeTask()`, `listTasks()`, `iterTasks()`, `getBalance()` (`availableUsd`, `heldUsd`, `totalUsd`), `getUsage()` (`totalSpend`, per-bucket `spend`), `listModels()` (`usd` rate snapshot), `getModel()` (inputSchema).
 - Files: `uploadFile($path)` returns `uri` `popnow://f/fil_...`; `UploadContentType::LoraWeights` for `.safetensors` up to 2 GiB; `importLoraFile($url, token:)` (POST /api/v1/files/import); `createDownloadUrl()`.
 - Asset library: `saveAsset(source: 'task_output'|'upload'|'url', idempotencyKey: ..., ...)` returns `uri` `popnow://a/ast_...`; `listAssets()`, `iterAssets()`, `getAsset()`, `updateAsset()`, `deleteAsset()`, `getAssetUsage()`, `listCharacters()`, `getCharacter()`.
 - Webhooks: `PopNow\Webhook::verifyRequest($secret)` for task callbacks (X-Webhook-Signature = base64 HMAC-SHA256 of "taskId.timestamp.sha256hex(body)"); `PopNow\EndpointWebhook::verifyRequest($whsecSecret)` for Standard Webhooks account endpoints.
@@ -23,7 +24,10 @@ Install: `composer require popnow/popnow` (Packagist), or clone and `require 'au
 - Website: https://popnow.ai
 - Docs: https://popnow.ai/docs
 - OpenAPI: https://popnow.ai/docs/openapi.yaml
-- Pricing: https://popnow.ai/pricing
-- MCP server: https://popnow.ai/mcp (remote endpoint https://api.popnow.ai/mcp)
+- API pricing: https://popnow.ai/api/pricing
+- API billing (add funds): https://popnow.ai/api/console/billing
+- Model list: https://popnow.ai/api/models
+- Developer MCP server: https://popnow.ai/api/mcp (endpoint https://api.popnow.ai/api/v1/mcp, API key auth; guide and @popnow/mcp bridge: https://github.com/popnow-ai/popnow-api-mcp)
+- Agent skills: https://popnow.ai/api/skills
 - Site llms.txt: https://popnow.ai/llms.txt
 - Source: https://github.com/popnow-ai/popnow-php

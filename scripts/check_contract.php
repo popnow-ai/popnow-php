@@ -12,6 +12,10 @@
  *
  * Usage: php scripts/check_contract.php            compare, exit 1 on drift
  *        php scripts/check_contract.php --update   rewrite contracts/openapi.yaml from the live copy
+ *
+ * The pinned copy is the published contract minus its generated header and minus the few model
+ * identifier lines that name a word the repository hygiene scan forbids (see
+ * contract_strip_vendor_lines()); both sides of the comparison go through the same filter.
  */
 
 declare(strict_types=1);
@@ -23,7 +27,8 @@ const LIVE_URL = 'https://popnow.ai/docs/openapi.yaml';
 const LOCAL = __DIR__ . '/../contracts/openapi.yaml';
 
 /**
- * Retrieves the published contract, minus its generated-header comment lines.
+ * Retrieves the published contract, minus its generated-header comment lines and the model
+ * identifier lines the repository hygiene scan forbids.
  *
  * An explicit User-Agent is mandatory: the site's edge refuses requests that carry none or a
  * default library one, and without it this check would fail in the name of "contract drift" for a
@@ -43,7 +48,7 @@ function fetchLive(): string
         exit(1);
     }
 
-    return contract_strip_header($body);
+    return contract_strip_vendor_lines(contract_strip_header($body));
 }
 
 $live = fetchLive();

@@ -2,14 +2,15 @@
 
 /**
  * Minimal end-to-end run against a real model: schema, optional upload, quote,
- * create, wait, read the result.
+ * create, wait, read the result. It spends from your API balance (USD), which
+ * you fund at https://popnow.ai/api/console/billing.
  *
  * Usage:
  *   export POPNOW_API_KEY="sk-popnow-..."
  *   php examples/generate.php alibaba/z-image-turbo/text-to-image "A small red fox in a teacup"
  *   php examples/generate.php alibaba/wan-3.0/image-to-video "Slow dolly in" path/to/photo.png
  *
- * Pick <model-id> from the live catalog (`listModels()` or https://popnow.ai/docs/models),
+ * Pick <model-id> from the live catalog (`listModels()` or https://popnow.ai/api/models),
  * never from a hard-coded list:
  *
  *   php -r 'require "autoload.php";
@@ -58,10 +59,11 @@ try {
     }
 
     // Quote first, then create the task against that same quote: a changed price is stopped with
-    // a 40901 before anything is charged, rather than quietly settling at the new one.
+    // a 40901 before anything is charged, rather than quietly settling at the new one. USD amounts
+    // are decimal strings; print and pass them on as they are, never through a float.
     $quote = $client->quote($model, $input);
-    printf("quote: up to %d credits (usually %d), expires %s\n",
-        $quote['maxCredits'], $quote['expectedCredits'], $quote['expiresAt']);
+    printf("quote: up to $%s (usually $%s), expires %s\n",
+        $quote['maxChargeUsd'], $quote['expectedChargeUsd'], $quote['expiresAt']);
 
     $accepted = $client->createTask(
         model: $model,
@@ -71,9 +73,10 @@ try {
         // having no idempotency at all.
         idempotencyKey: Client::idempotencyKey(),
         quoteId: $quote['quoteId'],
-        expectedCredits: $quote['maxCredits'],
+        // Confirm the maximum hold, not the typical charge.
+        expectedCostUsd: $quote['maxChargeUsd'],
     );
-    printf("task: %s (%d credits held)\n", $accepted['taskId'], $accepted['estimatedCredits']);
+    printf("task: %s ($%s held)\n", $accepted['taskId'], $accepted['estimatedCostUsd']);
 
     $task = $client->waitForTerminal(
         $accepted['taskId'],
@@ -83,8 +86,9 @@ try {
     );
 
     $state = TaskState::tryFrom((string) ($task['state'] ?? ''));
-    printf("state: %s, %s credits (settled: %s)\n",
-        $task['state'] ?? '?', $task['credits'] ?? '?', ($task['settled'] ?? false) ? 'yes' : 'no');
+    // costUsd is the final charge once settled is true, and the held amount before that.
+    printf("state: %s, $%s (settled: %s)\n",
+        $task['state'] ?? '?', $task['costUsd'] ?? '?', ($task['settled'] ?? false) ? 'yes' : 'no');
 
     if ($state !== TaskState::Succeeded) {
         $code = TaskErrorCode::fromTask($task);
