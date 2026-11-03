@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0 — 2026-11-03
+
+- Support the expanded live model catalog and embedding task outputs, including measured input usage.
+- Preserve exact multimodal USD rate metadata and document native embedding/speech interfaces.
+
+
 All notable changes to `popnow/popnow` are listed here. The version is the git tag; `composer.json`
 carries no version field, and `PopNow\Client::VERSION` (sent in the `User-Agent`) must equal the
 newest heading below.

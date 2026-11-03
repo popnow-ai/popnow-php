@@ -40,7 +40,7 @@ final class Client
      * The release of this package. Keep it equal to the newest CHANGELOG.md
      * heading and the git tag; `tests/unit.php` fails when the three disagree.
      */
-    public const VERSION = '0.2.0';
+    public const VERSION = '0.3.0';
 
     public const API_BASE_URL = 'https://api.popnow.ai/api/v1';
 
