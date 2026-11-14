@@ -20,7 +20,7 @@
   </p>
 </div>
 
-PopNow AI ([popnow.ai](https://popnow.ai)) is the world's first AI creative studio that pays you back, a browser-based studio for videos, images and music: image-to-video, text-to-video, AI images, music and speech, one-tap trending video effects and image styles. This SDK wraps its developer API (`https://api.popnow.ai/api/v1`) so you can call Kling, Seedance, Wan, Vidu, MiniMax, Nano Banana, GPT Image, Flux, Suno and more from PHP. Pay as you go in USD from a prepaid [API balance](https://popnow.ai/api/console/billing), no subscription; failed runs release their hold. *Make it pop.*
+PopNow AI ([popnow.ai](https://popnow.ai)) is the world's first AI studio with automatic price protection, a browser-based studio for videos, images and music: image-to-video, text-to-video, AI images, music and speech, one-tap trending video effects and image styles. This SDK wraps its developer API (`https://api.popnow.ai/api/v1`) so you can call Kling, Seedance, Wan, Vidu, MiniMax, Nano Banana, GPT Image, Flux, Suno and more from PHP. Pay as you go in USD from a prepaid [API balance](https://popnow.ai/api/console/billing), no subscription; failed runs release their hold. *Make it pop.*
 
 - **No dependencies.** `ext-json` and `ext-hash`; `ext-curl` when present, otherwise the `https://` stream wrapper.
 - **Safe retries.** Reads, quotes and keyed submissions are retried on `429` / `5xx` honouring `Retry-After`; a task without an `Idempotency-Key` is never resent behind your back.
